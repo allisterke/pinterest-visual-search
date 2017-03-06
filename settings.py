@@ -1,7 +1,10 @@
 
+# http proxy, format: xx.xx.xx.xx:xxx
+proxy = ''
+
 # username & password to login pinterest
-username = 'allisterke@gmail.com'
-password = '110110'
+username = ''
+password = ''
 
 # search result limit
 limit = 100

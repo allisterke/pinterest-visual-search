@@ -5,19 +5,21 @@ import os
 import re
 import settings
 
-# profile = webdriver.FirefoxProfile() 
-# profile.set_preference("network.proxy.type", 1)
-# profile.set_preference("network.proxy.http", "10.214.224.79")
-# profile.set_preference("network.proxy.http_port", 1080)
-# profile.set_preference("network.proxy.ssl", "10.214.224.79")
-# profile.set_preference("network.proxy.ssl_port", 1080)
-# profile.update_preferences() 
-# driver = webdriver.Firefox(firefox_profile=profile)
-
 with open(settings.links, 'r') as f:
     links = f.read().splitlines()
 
-driver = webdriver.Firefox()
+if settings.proxy:
+    proxy = settings.proxy.split(':')
+    profile = webdriver.FirefoxProfile() 
+    profile.set_preference("network.proxy.type", 1)
+    profile.set_preference("network.proxy.http", proxy[0])
+    profile.set_preference("network.proxy.http_port", int(proxy[1]))
+    profile.set_preference("network.proxy.ssl", proxy[0])
+    profile.set_preference("network.proxy.ssl_port", int(proxy[1]))
+    profile.update_preferences() 
+    driver = webdriver.Firefox(firefox_profile=profile)
+else:
+    driver = webdriver.Firefox()
 driver.get('https://www.pinterest.com')
 
 # login:
@@ -93,7 +95,7 @@ for link in links:
                         offset = count
                         for ic in ics[offset:]:
                             count += 1
-                            if count >= settings.limit:
+                            if count > settings.limit:
                                 break
                             img = ic.find_element_by_xpath('div/div/img');
                             src = img.get_attribute('src')
