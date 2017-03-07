@@ -22,7 +22,10 @@ def create_driver():
         profile.update_preferences()
         driver = webdriver.Firefox(firefox_profile=profile)
     else:
-        driver = webdriver.Firefox()
+        profile = webdriver.FirefoxProfile()
+        profile.set_preference("network.proxy.type", 5)
+        profile.update_preferences()
+        driver = webdriver.Firefox(firefox_profile=profile)
 
     if settings.pageLoadtimeout:
         driver.set_page_load_timeout(settings.pageLoadtimeout)
@@ -125,6 +128,7 @@ def getSearchResults(driver):
                 break
             try:
                 src = image.get_attribute('src')
+                src = re.sub(r'\d+x', 'originals', src)
                 results.append(src)
             except:
                 break
