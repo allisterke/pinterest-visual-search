@@ -5,107 +5,202 @@ import os
 import re
 import settings
 
-with open(settings.links, 'r') as f:
-    links = f.read().splitlines()
+def get_all_links():
+    with open(settings.links, 'r') as f:
+        links = f.read().splitlines()
+    return links
 
-if settings.proxy:
-    proxy = settings.proxy.split(':')
-    profile = webdriver.FirefoxProfile() 
-    profile.set_preference("network.proxy.type", 1)
-    profile.set_preference("network.proxy.http", proxy[0])
-    profile.set_preference("network.proxy.http_port", int(proxy[1]))
-    profile.set_preference("network.proxy.ssl", proxy[0])
-    profile.set_preference("network.proxy.ssl_port", int(proxy[1]))
-    profile.update_preferences() 
-    driver = webdriver.Firefox(firefox_profile=profile)
-else:
-    driver = webdriver.Firefox()
-driver.get('https://www.pinterest.com')
+def create_driver():
+    if settings.proxy:
+        proxy = settings.proxy.split(':')
+        profile = webdriver.FirefoxProfile()
+        profile.set_preference("network.proxy.type", 1)
+        profile.set_preference("network.proxy.http", proxy[0])
+        profile.set_preference("network.proxy.http_port", int(proxy[1]))
+        profile.set_preference("network.proxy.ssl", proxy[0])
+        profile.set_preference("network.proxy.ssl_port", int(proxy[1]))
+        profile.update_preferences()
+        driver = webdriver.Firefox(firefox_profile=profile)
+    else:
+        driver = webdriver.Firefox()
+
+    if settings.pageLoadtimeout:
+        driver.set_page_load_timeout(settings.pageLoadtimeout)
+    if settings.elementLoadTimeout:
+        driver.implicitly_wait(settings.elementLoadTimeout)
+
+    return driver
 
 # login:
-username = driver.find_element_by_xpath('//input[@name="id"]')
-username.click()
-username.clear()
-username.send_keys(settings.username)
+def login(driver):
+    try:
+        if not settings.username or not settings.password:
+            print 'username or password not configured, quit'
+            return False
 
-password = driver.find_element_by_xpath('//input[@name="password"]')
-password.click()
-password.clear()
-password.send_keys(settings.password)
+        driver.get('https://www.pinterest.com/')
 
-button = driver.find_element_by_css_selector('button.SignupButton')
-button.click()
+        username = driver.find_element_by_xpath('//input[@name="id"]')
+        username.click()
+        username.clear()
+        username.send_keys(settings.username)
 
-time.sleep(5);
+        password = driver.find_element_by_xpath('//input[@name="password"]')
+        password.click()
+        password.clear()
+        password.send_keys(settings.password)
 
-for link in links:
-    if not link:
-        continue
-        
-    # visit page:
-    driver.get(link + 'visual-search')
-    
-    # extract pin id
-    id = re.search(r'[0-9]+', link).group(0)
+        button = driver.find_element_by_css_selector('button.SignupButton')
+        button.click()
 
-    # make directory for link
-    if not os.path.exists(id):
-        os.mkdir(id)
+        return True
+    except:
+        return False
 
-    with open(id + '/source.txt', 'wb') as f:
-        # retrive source image
-        while True:
-            try:
-                src = driver.find_element_by_css_selector('div.FlashlightEnabledImage').find_element_by_xpath('div/img');
-                break
-            except:
-                pass
+def getSource(driver):
+    # retrive source image
+    try:
+        src = driver.find_element_by_css_selector('div.FlashlightEnabledImage div img');
         src = src.get_attribute('src')
-        print 'source:', src
+    except:
+        src = None
+    return src
+
+def saveSource(pid, src):
+    with open(pid + '/source.txt', 'wb') as f:
+        print '\tsource:', src
         f.write(src)
         f.write('\n')
 
-    with open(id + '/tags.txt', 'wb') as f:
-        # retrive tag:
-        while True:
-            try:
-                tags = driver.find_elements_by_class_name('flashlightAnnotationListItem')
-                tags = map(lambda x: x.text, tags)
-                if tags:
-                    break
-            except:
-                pass
+def getTags(driver):
+    # retrive tag:
+    try:
+        tags = driver.find_elements_by_class_name('flashlightAnnotationListItem')
+        tags = map(lambda x: x.text, tags)
+    except:
+        tags = None
+    return tags
+
+def saveTags(pid, tags):
+    with open(pid + '/tags.txt', 'wb') as f:
         tags = ','.join(tags)
-        print 'tags:' , tags
+        print '\ttags:' , tags
         f.write(tags)
         f.write('\n')
 
-    with open(id + '/search-results.txt', 'wb') as f:
-        # retrive seach results:
-        count = 0
-        retry = 0
-        while retry < 3 and count < settings.limit:
-            driver.execute_script('var c = document.getElementsByClassName("flashlightResultsContainer")[0]; c.scrollTop = c.scrollHeight;')
-            time.sleep(3)
+def scrollMoreSearchResults(driver, count):
+    # wait until more search results are displayed
+    images = []
+    for i in range(settings.scrollTimeout):
+        try:
+            images = driver.find_elements_by_css_selector('a.pinImageWrapper div div img')
+            if len(images) > count:
+                break
+        except:
+            pass
+        time.sleep(1)
+    return images
 
-            while count < settings.limit:
-                try:
-                    ics = driver.find_elements_by_css_selector('a.pinImageWrapper')
-                    if len(ics) > count:
-                        offset = count
-                        for ic in ics[offset:]:
-                            count += 1
-                            if count > settings.limit:
-                                break
-                            img = ic.find_element_by_xpath('div/div/img');
-                            src = img.get_attribute('src')
-                            print "%5d: %s" % (count, src);
-                            f.write(src)
-                            f.write('\n')
-                        retry = 0
-                    else:
-                        retry += 1
-                        break
-                except:
-                    pass
-driver.quit()
+def getSearchResults(driver):
+    scrollJS = '''
+                var c = document.getElementsByClassName("flashlightResultsContainer")[0];
+                c.scrollTop = c.scrollHeight;
+               '''
+    results = []
+
+    # retrieve seach results:
+    count = 0
+    retry = 0
+    while count < settings.limit:
+        images = scrollMoreSearchResults(driver, count)
+
+        # no more search results
+        if len(images) <= count:
+            break
+
+        offset = count
+        for image in images[offset:]:
+            count += 1
+            if count > settings.limit:
+                break
+            try:
+                src = image.get_attribute('src')
+                results.append(src)
+            except:
+                break
+
+        if count < settings.limit:
+            driver.execute_script(scrollJS)
+            # wait for scroll interval
+            if settings.scrollInterval:
+                time.sleep(settings.scrollInterval)
+        else:
+            break
+    return results
+
+def saveSearchResults(pid, results):
+    with open(pid + '/search-results.txt', 'wb') as f:
+        for index, src in zip(range(1, len(results)+1), results):
+            print "\t%5d: %s" % (index, src);
+            f.write(src)
+            f.write('\n')
+
+
+if __name__ == '__main__':
+    links = get_all_links()
+
+    driver = create_driver()
+
+    if not login(driver):
+        print 'login failed, quit'
+        driver.quit()
+        exit(1)
+    # wait for login to complete
+    time.sleep(5)
+
+    linkCount = len(links)
+    for index, link in zip(range(1, linkCount+1), links):
+        print '%d of %d, link: %s' % (index, linkCount, link)
+
+        # visit page:
+        try:
+            driver.get(link + 'visual-search')
+        except:
+            print 'cannot load this link or timeout, quit'
+            break
+
+        # extract pin id
+        pid = re.search(r'[0-9]+', link).group(0)
+        # make directory for link
+        if not os.path.exists(pid):
+            os.mkdir(pid)
+
+        # get and save source image
+        src = getSource(driver)
+        if not src:
+            print 'cannot get source image, quit'
+            break
+        else:
+            saveSource(pid, src)
+
+        # get and save tags
+        tags = getTags(driver)
+        if not tags:
+            print 'cannot get tags, quit'
+            break
+        else:
+            saveTags(pid, tags)
+
+        # get and save search results
+        results = getSearchResults(driver)
+        if not results:
+            print 'cannot get search results, quit'
+            break
+        else:
+            saveSearchResults(pid, results)
+
+        # interval between two links, to avoid ban from Pinterest
+        if settings.searchInterval:
+            time.sleep(settings.searchInterval)
+
+    driver.quit()
